@@ -1,0 +1,10 @@
+.git/
+data/
+outputs/
+gt_shards/
+__pycache__/
+*.pyc
+.venv/
+build/
+.pytest_cache/
+*.mp4

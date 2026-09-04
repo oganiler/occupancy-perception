@@ -1,0 +1,28 @@
+# nuScenes data — never commit
+data/
+*.tgz
+*.tar.bz2
+
+# Generated artifacts
+outputs/
+gt_shards/
+*.npz
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# C++ build
+build/
+*.so
+*.o
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
