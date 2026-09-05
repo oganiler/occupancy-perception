@@ -1,0 +1,6 @@
+# Dev-only override. The deliverable docker-compose.yml at the repo root stays
+# untouched, so the reviewer runs exactly what is committed there.
+services:
+  occ:
+    # Our image's CMD is ["bash"], which exits immediately under `compose up`.
+    command: sleep infinity
