@@ -1,0 +1,53 @@
+# ---------------------------------------------------------------------------
+# Dataset
+# ---------------------------------------------------------------------------
+dataset:
+  root: /data/nuscenes          # bind-mounted, read-only
+  version: v1.0-mini
+
+# ---------------------------------------------------------------------------
+# Occupancy grid. Matches the Occ3D-nuScenes specification so results are
+# comparable with published numbers. Ego frame; origin is the min corner.
+# ---------------------------------------------------------------------------
+grid:
+  point_cloud_range: [-40.0, -40.0, -1.0, 40.0, 40.0, 5.4]   # xmin ymin zmin xmax ymax zmax
+  voxel_size: [0.4, 0.4, 0.4]
+  # -> dims [200, 200, 16] = 640,000 voxels, derived, not hardcoded
+
+# ---------------------------------------------------------------------------
+# Ground truth generation.  See docs/decisions.md D-001.
+# ---------------------------------------------------------------------------
+gt:
+  # Keyframes only: every aggregated point carries a measured lidarseg label.
+  # 'sweeps' (20 Hz + KNN label propagation) is a future extension.
+  aggregation_mode: keyframes           # keyframes | sweeps
+
+  # Window is +/- this many keyframes, clamped at scene boundaries.
+  # 4 keyframes at 2 Hz = +/- 2.0 s.
+  window_keyframes: 4
+
+  separate_dynamic: true                # box-local aggregation for moving objects
+  min_distance_m: 1.0                   # drop returns from the ego vehicle itself
+
+  backend: python                       # python | cpp  (see VoxelizerBackend)
+  generate_camera_mask: false           # produce mask_camera in the shard?
+
+  output_dir: /workspace/gt_shards
+
+# ---------------------------------------------------------------------------
+# DL pipeline
+# ---------------------------------------------------------------------------
+data:
+  num_frames: 1                         # temporal axis; >1 enables temporal fusion
+  image_size: [256, 704]                # downscaled from 900x1600 for CPU
+  cameras:
+    - CAM_FRONT
+    - CAM_FRONT_RIGHT
+    - CAM_BACK_RIGHT
+    - CAM_BACK
+    - CAM_BACK_LEFT
+    - CAM_FRONT_LEFT
+
+loss:
+  use_camera_mask: false                # requires gt.generate_camera_mask
+  ignore_index: 255
