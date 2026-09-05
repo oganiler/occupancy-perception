@@ -1,5 +1,5 @@
 # nuScenes data — never commit
-data/
+/data/
 *.tgz
 *.tar.bz2
 

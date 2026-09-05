@@ -104,3 +104,96 @@ so that a devkit upgrade cannot change it unnoticed.
 application. A ground robot may, for example, need `pushable_pullable` and
 `debris` as distinct traversability-relevant classes rather than folded into
 `others`.
+
+## D-003: Ray-casting policy for box-corrected dynamic points
+
+**Status:** accepted
+
+**Context.**
+Free space in the occupancy grid can only come from ray traversal: a voxel is
+`free` because a beam passed through it. Occupied voxels come from beam
+endpoints. The voxelizer therefore needs, per point, an origin and an endpoint.
+
+D-001 aggregates +/-4 keyframes. For points on annotated objects, the adapter
+applies a box-local correction: a point observed on an object at time t_i is
+placed where that object sits at t_ref. This is what prevents a vehicle at
+10 m/s from smearing 40 m across the grid.
+
+That correction breaks the ray. The beam was fired from origin O to the
+observed surface A. After correction the point is at B. O->A is what was
+physically measured; B is where the geometry belongs at t_ref. For an
+approaching vehicle B lies between O and A, so the measured ray passes
+directly through the corrected object.
+
+**Options.**
+- A. Cast O->B. Asserts free space along a path that was partly occluded by
+     the object at A when the measurement was taken.
+- B. Cast O->A and mark A occupied. Leaves a ghost at a position the object
+     has since vacated.
+- C. Cast O->A for free space only, insert B as occupied separately. The free
+     ray traverses B, erasing the object the correction just reconstructed.
+- D. Cast no ray for corrected points. Use them only to mark B occupied.
+     Free space comes from static points and from the reference sweep.
+
+**Decision.** Option D, with an exception for the reference sweep.
+
+Per-point ray policy:
+
+| Point source                            | Free ray | Marks occupied |
+|-----------------------------------------|----------|----------------|
+| Static, any keyframe in the window       | yes      | yes            |
+| Inside an annotated box, reference sweep | yes      | yes            |
+| Inside an annotated box, other keyframes | **no**   | yes            |
+
+The reference sweep is exempt because at t_ref the correction is the identity:
+observed and corrected positions coincide, so the measured ray remains valid.
+
+**Rationale.**
+Options A, B and C each introduce a claim the sensor never made. Option D
+declines to claim anything about space it cannot vouch for. Voxels that would
+have been marked free by a discarded ray remain `unobserved` -- which is the
+honest answer, and which the visibility mask already exists to express.
+
+This is consistent with D-001: where the data does not support a determination,
+prefer `unobserved` over an inferred value. Ground truth quality is the
+property the entire pipeline is supervised against.
+
+**Precedence.** Occupied wins over free. A voxel receiving both a traversal
+and an endpoint is `occupied`: a return is direct evidence of a surface,
+whereas a traversal is evidence only along one line of sight and may be
+contradicted by another. Without this rule the result would depend on ray
+processing order, which must not happen -- the voxelizer is required to be
+deterministic.
+
+**Consequences.**
+- Reduced free-space coverage in regions dominated by moving objects,
+  typically the road surface ahead of and behind traffic. Those voxels stay
+  `unobserved` rather than being wrongly marked `free`.
+- Requires the per-point flags `in_annotated_box` and `from_reference` that
+  the adapter already emits. The adapter supplies facts; this policy consumes
+  them. No adapter change is needed.
+- The policy is a voxelizer-level concern and must be identical across the
+  Python and C++ backends, so the parity test covers it implicitly.
+
+**Measurement.** Report the fraction of voxels in each state, split by whether
+dynamic correction is enabled. The expected signature is a modest rise in
+`unobserved` and a fall in `free`, with `occupied` roughly unchanged. A large
+change in `occupied` would indicate the policy is being applied incorrectly.
+
+**Revisit if.** `unobserved` fraction rises far enough that too few voxels
+carry supervision. The fallback is to cast free rays only up to a conservative
+margin short of the corrected position, accepting some inference in exchange
+for coverage.
+
+**Why t_ref is the correct correction target.**
+A nuScenes sample is a hardware-synchronised snapshot: camera exposure is
+triggered as the top LiDAR sweeps across each camera's field of view. The
+reference keyframe is therefore the timestamp of the images the model
+consumes. Correcting dynamic objects to any other time in the window would
+place them systematically ahead of or behind their appearance in the input
+images, making the target unlearnable.
+
+Residual limitation: the six cameras fire in sequence across one LiDAR
+rotation (bounded by 50 ms at 20 Hz), so a single grid cannot be exactly
+simultaneous with all six views. At 10 m/s this is roughly one voxel of
+displacement. Not modelled; noted.
