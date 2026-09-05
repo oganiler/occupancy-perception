@@ -1,0 +1,15 @@
+# Direct dependencies only. The full resolved set, captured from a verified
+# working build, is in requirements.lock.txt. See README for the pinning policy.
+
+# Dataset access. Pins numpy<2 transitively; opencv-python-headless means
+# no system OpenGL libraries are required in the slim image.
+nuscenes-devkit==1.2.0
+
+# Configuration
+omegaconf==2.3.0
+
+# Testing
+pytest==8.2.2
+
+# Plotting (devkit requires >=3.6.0; pinned here for reproducibility)
+matplotlib==3.8.4

@@ -1,0 +1,19 @@
+services:
+  occ:
+    build:
+      context: .
+      args:
+        UID: "${UID:-1000}"
+        GID: "${GID:-1000}"
+    image: occ-pipeline:dev
+    working_dir: /workspace
+    volumes:
+      # Source is bind-mounted so edits take effect without a rebuild.
+      - ./:/workspace
+      # Dataset stays outside the image. Read-only: GT generation must
+      # never be able to modify the raw data.
+      - ${NUSCENES_ROOT:-${HOME}/data/nuscenes}:/data/nuscenes:ro
+    environment:
+      NUSCENES_ROOT: /data/nuscenes
+    stdin_open: true
+    tty: true
