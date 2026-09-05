@@ -105,6 +105,18 @@ application. A ground robot may, for example, need `pushable_pullable` and
 `debris` as distinct traversability-relevant classes rather than folded into
 `others`.
 
+**Verification.** Confirmed. Rendering the ground-truth semantics in BEV for
+scene-0757 produces a coherent street scene: `driveable_surface` forms a
+connected drivable region around the ego (1,005 columns, the largest class),
+bordered by `sidewalk` and `terrain`, with `manmade` (988) on the building
+facades. Vehicle classes appear as compact clusters on the road surface, and
+small objects (`pedestrian`, `traffic_cone`) survive voxelization at 0.4 m.
+The devkit-derived index mapping is therefore correct against rendered
+geometry, not only against the published class list.
+
+A unit test pins the resulting (32,) lookup table so a devkit upgrade cannot
+change it unnoticed.
+
 ## D-003: Ray-casting policy for box-corrected dynamic points
 
 **Status:** accepted

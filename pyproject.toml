@@ -10,3 +10,13 @@ requires-python = ">=3.9"
 
 [tool.setuptools.packages.find]
 include = ["occupancy*"]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "error",
+    # matplotlib 3.8 calls deprecated pyparsing methods; not actionable here.
+    "ignore::DeprecationWarning:matplotlib",
+    "ignore:.*parseString.*:DeprecationWarning",
+    "ignore:.*resetCache.*:DeprecationWarning",
+    "ignore:.*enablePackrat.*:DeprecationWarning",
+]

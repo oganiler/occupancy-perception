@@ -2,7 +2,7 @@
 # Dataset
 # ---------------------------------------------------------------------------
 dataset:
-  root: /data/nuscenes          # bind-mounted, read-only
+  root: ${oc.env:NUSCENES_ROOT,/data/nuscenes}
   version: v1.0-mini
 
 # ---------------------------------------------------------------------------
@@ -31,6 +31,10 @@ gt:
 
   backend: python                       # python | cpp  (see VoxelizerBackend)
   generate_camera_mask: false           # produce mask_camera in the shard?
+
+  free_ray_stride: 1     # 1 = cast every free-space ray. >1 subsamples them:
+                         # adjacent rays traverse nearly the same voxels, so
+                         # this trades free-space coverage for runtime.  
 
   output_dir: /workspace/gt_shards
 

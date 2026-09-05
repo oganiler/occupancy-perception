@@ -71,10 +71,10 @@ class NuScenesAdapter:
         self,
         dataroot: str,
         version: str,
-        window_keyframes: int = 4,
-        min_distance_m: float = 1.0,
-        separate_dynamic: bool = True,
-        camera_names: tuple[str, ...] = (),
+        window_keyframes: int,
+        min_distance_m: float,
+        separate_dynamic: bool,
+        camera_names: tuple[str, ...],
     ) -> None:
         self.nusc = NuScenes(version=version, dataroot=dataroot, verbose=False)
         self.window_keyframes = window_keyframes
