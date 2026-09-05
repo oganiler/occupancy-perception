@@ -209,3 +209,77 @@ Residual limitation: the six cameras fire in sequence across one LiDAR
 rotation (bounded by 50 ms at 20 Hz), so a single grid cannot be exactly
 simultaneous with all six views. At 10 m/s this is roughly one voxel of
 displacement. Not modelled; noted.
+
+## D-004: Amanatides-Woo for ray traversal
+
+**Status:** accepted
+
+**Context.**
+Free space is the only occupancy state that cannot be derived from the points
+alone: a voxel is `free` because a beam passed through it. The voxelizer must
+therefore enumerate, for each ray, the set of voxels between sensor origin and
+returned point. On scene-0757 this is ~102,000 rays per sample and dominates
+the runtime.
+
+Correctness here is not cosmetic. Free space is 11.6% of the grid and is what
+the loss is computed against for non-occupied voxels. An enumeration that
+misses voxels leaves holes in the ground truth that would still look
+approximately right in a BEV render.
+
+**Options.**
+- A. Sample the ray at fixed intervals of t and floor each sample to a voxel.
+- B. 3D Bresenham line drawing.
+- C. Amanatides-Woo voxel traversal.
+
+**Decision.** Option C.
+
+**Rationale.**
+Option A is approximate by construction. Voxel boundary crossings are
+irregularly spaced along a ray, so no fixed step size is simultaneously
+complete (misses no crossed voxel) and non-redundant (revisits none). Too
+coarse leaves stochastic holes in free space; too fine wastes work.
+
+Option B solves a different problem. Bresenham produces a connected line of
+voxels, taking one voxel per major-axis step. Where a ray crosses a
+perpendicular boundary partway along a step, the ray is genuinely inside two
+voxels but Bresenham reports one. The omissions are systematic along diagonal
+rays, not random.
+
+Option C is exact: it returns every voxel whose volume the ray intersects, in
+order, with no duplicates and no gaps. The authors describe it as a variant of
+the DDA line algorithm that permits simpler traversal "at the expense of more
+voxels" -- precisely the trade-off this application wants, since the extra
+voxels are exactly the ones a line algorithm wrongly omits.
+
+Cost per voxel is O(1): the published figure is two floating-point comparisons
+and one floating-point addition per step. All division is hoisted into the
+per-ray setup.
+
+**Implementation notes.**
+The traversal runs in continuous *voxel* coordinates rather than metres. This
+sets the voxel size to 1, so `t_delta[k]` reduces to `1 / |d_k|` with no voxel
+size threaded through the loop, and it makes the integer part of a coordinate
+the voxel index directly, so traversal and indexing cannot disagree about
+where a boundary is.
+
+The direction vector is `end - origin`, unnormalised, so the ray parameter t
+runs 0 to exactly 1.0. Termination is `t_max[axis] > 1.0`, an exact
+comparison requiring no epsilon. A normalised direction compared against a
+metric ray length would require a tolerance, and tolerances need tuning.
+
+The endpoint voxel is excluded from the free pass; pass 2 claims it as
+occupied (D-003).
+
+**Consequences.**
+- The free-space pass is an inherently sequential per-ray loop and accounts
+  for essentially all of the 1.54 s/sample runtime. Pass 2 is vectorised and
+  already runs at NumPy speed. Any future native backend should therefore
+  target the traversal, not the endpoint pass.
+- `free_ray_stride` exists as a coverage-for-runtime knob, since adjacent rays
+  traverse nearly identical voxel sets. Currently 1.
+- Behaviour is pinned by tests: axis-aligned traversal, the no-free-ray path,
+  out-of-bounds cropping, and bit-exact determinism across runs.
+
+**Attribution.** The algorithm is published prior work, cited above and in
+ASSISTANCE.md. The implementation in `occupancy/gt/backends/reference.py` is
+this project's own.
