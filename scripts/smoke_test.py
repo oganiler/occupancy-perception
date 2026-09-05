@@ -1,21 +1,20 @@
 # scripts/smoke_test.py
 """Verify the container has everything the pipeline needs."""
 import sys
+from importlib.metadata import version
 
 
 def main() -> int:
     import numpy as np
     import torch
     import matplotlib
-    import nuscenes
-    from omegaconf import OmegaConf
 
-    print(f"python      {sys.version.split()[0]}")
-    print(f"numpy       {np.__version__}")
-    print(f"torch       {torch.__version__}  (cuda={torch.cuda.is_available()})")
-    print(f"matplotlib  {matplotlib.__version__}")
-    print(f"nuscenes    {nuscenes.__version__ if hasattr(nuscenes, '__version__') else 'installed'}")
-    print(f"omegaconf   {OmegaConf.__module__ and 'installed'}")
+    print(f"python           {sys.version.split()[0]}")
+    print(f"numpy            {np.__version__}")
+    print(f"torch            {torch.__version__}  (cuda={torch.cuda.is_available()})")
+    print(f"matplotlib       {matplotlib.__version__}")
+    print(f"nuscenes-devkit  {version('nuscenes-devkit')}")
+    print(f"omegaconf        {version('omegaconf')}")
 
     assert np.__version__.startswith("1."), "numpy 2.x will break nuscenes-devkit"
 
