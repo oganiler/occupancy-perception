@@ -54,6 +54,7 @@ class SampleData:
     sample_token: str
     scene_name: str
     timestamp_us: int
+    num_keyframes: int             # actually aggregated, after boundary clamping
     cloud: AggregatedCloud
     cameras: tuple[CameraData, ...]
     T_global_from_ego: np.ndarray  # (4, 4), reference keyframe ego pose
@@ -105,10 +106,11 @@ class NuScenesAdapter:
         # Boxes at the reference time, keyed by instance, in global frame.
         ref_boxes = self._boxes_by_instance(ref_sd_token)
 
+        window = self._keyframe_window(sample_token)
         chunks = [
             self._load_keyframe(tok, ref_sd_token, T_egoref_from_global, ref_boxes)
-            for tok in self._keyframe_window(sample_token)
-        ]
+            for tok in window
+        ] 
 
         cloud = AggregatedCloud(
             points_m=np.concatenate([c[0] for c in chunks]).astype(np.float32),
@@ -116,13 +118,14 @@ class NuScenesAdapter:
             sensor_origins_m=np.concatenate([c[2] for c in chunks]).astype(np.float32),
             in_annotated_box=np.concatenate([c[3] for c in chunks]),
             from_reference=np.concatenate([c[4] for c in chunks]),
-        )
+        )     
 
         scene = self.nusc.get("scene", ref_sample["scene_token"])
         return SampleData(
             sample_token=sample_token,
             scene_name=scene["name"],
             timestamp_us=ref_sample["timestamp"],
+            num_keyframes=len(window),
             cloud=cloud,
             cameras=self._cameras(ref_sample),
             T_global_from_ego=T_global_from_egoref,

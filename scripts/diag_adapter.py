@@ -22,7 +22,8 @@ sample = adapter.get(tok)
 c = sample.cloud
 p, lab = c.points_m, c.labels
 
-print(f"{sample.scene_name}  window={cfg.gt.window_keyframes}  points={len(c):,}")
+print(f"{sample.scene_name}  configured={cfg.gt.window_keyframes}  "
+      f"aggregated={sample.num_keyframes}  points={len(c):,}")
 
 # 1. Ground plane. In the EGO frame the road sits near z = 0: the LIDAR_TOP
 #    extrinsic lifts the sensor ~1.84 m, and that offset is removed by the

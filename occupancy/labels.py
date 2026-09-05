@@ -16,6 +16,7 @@ from nuscenes.eval.lidarseg.utils import LidarsegClassMapper
 NUM_CLASSES: int = 18       # 0..16 semantic + 17 free
 FREE_CLASS: int = 17
 OTHERS_CLASS: int = 0       # devkit calls this 'ignore'
+UNOBSERVED_LABEL: int = 255   # sentinel in the stored target; not a class
 
 OCC3D_CLASS_NAMES: tuple[str, ...] = (
     "others", "barrier", "bicycle", "bus", "car", "construction_vehicle",

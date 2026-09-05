@@ -283,3 +283,107 @@ occupied (D-003).
 **Attribution.** The algorithm is published prior work, cited above and in
 ASSISTANCE.md. The implementation in `occupancy/gt/backends/reference.py` is
 this project's own.
+
+## D-005: Shard format — single target array with a sentinel
+
+**Status:** accepted
+
+**Context.**
+Ground truth must persist between GT generation (offline, once) and the DL
+pipeline (per epoch). The voxelizer produces two arrays: `state`
+(unobserved/free/occupied) and `semantics` (Occ3D class per voxel). The
+question is what lands on disk.
+
+**Options.**
+- A. Store both arrays. Self-documenting, but partly redundant: `semantics`
+     already encodes occupied (0..16) and free (17); only `unobserved` is not
+     representable.
+- B. Store one array with 255 as an `unobserved` sentinel.
+
+**Decision.** Option B. `target` is (200, 200, 16) uint8: 0..16 semantic
+class, 17 free, 255 unobserved.
+
+**Rationale.**
+The stored array *is* the cross-entropy target. `ignore_index=255` consumes it
+directly, with no separate masking step to write, test, or get wrong. The
+LiDAR visibility mask is implicit (`target != 255`) rather than a second
+stored array that could drift out of sync with the first.
+
+It also makes D-002's "unobserved is a mask state, not a class" structural:
+255 lies outside the class range by construction, so no code path can treat it
+as a class.
+
+`config.py` asserts `loss.ignore_index == UNOBSERVED_LABEL` at load, so a
+mismatch fails at startup rather than silently producing a wrong loss.
+
+**Storage layout: measured and left alone.**
+Compression was measured rather than assumed. `savez_compressed` gives 11x
+(≈55 KiB/shard) at 0.01 s per shard, so compression is effectively free and
+turns ~250 MB into ~25 MB for the mini split.
+
+The array is stored in its natural memory order, where z varies fastest.
+Transposing so that z varies slowest improves compression to 16.1x — a 26%
+reduction, or ~5 MB across the full mini split. Rejected: it introduces a
+permanent axis-order asymmetry between memory and disk, and a single forgotten
+transpose would silently produce a rotated grid. 5 MB does not buy that risk.
+
+**Contents.** Each shard holds the target grid, relative image paths (not
+pixels), camera names, intrinsics, ego-from-camera extrinsics, the global-from-
+ego pose, and a JSON metadata blob (sample token, scene, timestamp,
+`num_keyframes`, point count).
+
+Image paths are stored relative to the dataset root so a shard directory is
+portable; the Dataset rejoins them with its own configured root. The ego pose
+is stored so inter-sample ego motion can be derived later, which is what
+temporal fusion requires — cheap now, expensive to retrofit.
+
+`config.snapshot.yaml` is written alongside the shards, so a shard directory
+records the window size, stride and grid spec that produced it.
+
+**Consequences.**
+- The shard is the architectural seam. Everything upstream imports `nuscenes`;
+  everything downstream imports only `numpy` and `torch`. The devkit never
+  enters a dataloader worker, and the DL pipeline is testable against synthetic
+  shards with no dataset mounted.
+- Any consumer wanting the three-state view derives it: `==255`, `==17`,
+  `else occupied`.
+- `read_shard` uses `allow_pickle=False`. An npz requiring pickle to load can
+  execute arbitrary code, and nothing stored here needs it.
+
+  ## D-006: free_ray_stride left at 1
+
+**Status:** accepted
+
+**Context.**
+Adjacent LiDAR rays traverse nearly identical voxel sets, so the free-space
+pass is highly redundant. `free_ray_stride` subsamples rays to trade coverage
+for runtime.
+
+**Measurement (40 samples).**
+
+| stride | s/sample | disk   | compression |
+|--------|----------|--------|-------------|
+| 1      | 3.83     | 2.3 MB | 11x         |
+| 4      | 1.86     | 2.7 MB | 10x         |
+
+**Decision.** Leave at 1.
+
+**Rationale.**
+Two results argue against striding.
+
+Quartering the rays gives only a **2.1x** speedup, not 4x. Traversal dominates
+runtime but does not monopolise it; the adapter and the vectorised endpoint
+pass form a fixed floor. Even an infinitely fast traversal would cap the
+end-to-end gain near 2x.
+
+More surprisingly, striding produces **larger** files (2.3 → 2.7 MB). Fewer
+rays do not shrink the free region uniformly — they perforate it. Solid blocks
+of `free` become free voxels speckled through unobserved ones, because the
+adjacent rays that would have filled the gaps are skipped. Speckle has higher
+local entropy than either solid region, so it compresses worse.
+
+So striding costs coverage *and* disk, buying only 2x time on a step that is
+not a bottleneck at this dataset size (404 samples ≈ 27 minutes).
+
+**Consequences.** The parameter remains in the configuration as a knob for
+larger datasets, where the absolute time saving would matter more.

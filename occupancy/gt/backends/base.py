@@ -29,3 +29,12 @@ class VoxelizerBackend(Protocol):
                    undefined where state is UNOBSERVED.
         """
         ...
+
+def to_target(state: np.ndarray, semantics: np.ndarray) -> np.ndarray:
+    """Fold (state, semantics) into the single stored target array.
+
+    0..16 semantic class, 17 free, 255 unobserved. This is the array the
+    cross-entropy consumes directly with ignore_index=255.
+    """
+    from occupancy.labels import UNOBSERVED_LABEL
+    return np.where(state == UNOBSERVED, UNOBSERVED_LABEL, semantics).astype(np.uint8)        

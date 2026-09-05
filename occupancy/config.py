@@ -113,3 +113,10 @@ def _validate(cfg: DictConfig) -> None:
         raise ValueError(
             "loss.use_camera_mask requires gt.generate_camera_mask"
         )
+
+    from occupancy.labels import UNOBSERVED_LABEL
+    if cfg.loss.ignore_index != UNOBSERVED_LABEL:
+        raise ValueError(
+            f"loss.ignore_index ({cfg.loss.ignore_index}) must equal the shard "
+            f"sentinel ({UNOBSERVED_LABEL})"
+        )
