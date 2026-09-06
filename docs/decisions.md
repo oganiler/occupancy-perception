@@ -41,6 +41,27 @@ without smearing moving objects.
 **Revisit if.** Free-space and occupied coverage prove too sparse to train
 against, measured as the fraction of voxels remaining `unobserved`.
 
+**Measured boundary of this decision.**
+Aggregation recovers coverage through ego parallax, not through sample count.
+Across 404 samples, ego displacement over the aggregation window correlates
+with unobserved fraction at r = -0.673. Scenes where the ego is stationary
+(scene-0553 at 0.0 m, scene-0757 at 4.9 m) sit at 81% unobserved, while scenes
+with 45+ m of displacement sit near 51%.
+
+For a stationary sample, nine keyframes are nine near-identical point clouds:
+the same beams strike the same ground radii, so the ring gaps between beams
+are never filled. Widening the window cannot help, because the limitation is
+parallax rather than the number of clouds.
+
+This is the precise condition under which Option A costs coverage. Roughly 20%
+of the mini split is stationary or near-stationary (waiting at intersections),
+and for those samples only the label-propagation approach of Option B, or
+mesh-based hole filling, would improve ground-truth density.
+
+Displacement explains about 45% of the variance in coverage; the remainder is
+environmental, since scene-1100 is also stationary (0.2 m) yet reaches 67%
+rather than 81%.
+
 ## D-002: Occ3D-nuScenes class set, derived from the devkit's coarse mapping
 
 **Status:** accepted
