@@ -1,8 +1,9 @@
 # scripts/check_adapter.py
 from occupancy.config import load_config
-from occupancy.factory import build_adapter, build_grid_spec, build_voxelizer
+from occupancy.factory import build_adapter, build_grid_spec
 
-cfg = load_config()
+import sys
+cfg = load_config(overrides=sys.argv[1:])
 spec = build_grid_spec(cfg)
 adapter = build_adapter(cfg)
 

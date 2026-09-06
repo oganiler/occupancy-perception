@@ -2,7 +2,9 @@ import numpy as np, io, time
 from occupancy.gt.shard import read_shard
 from pathlib import Path
 
-t = read_shard(sorted(Path("/workspace/gt_shards").glob("*.npz"))[0]).target
+from occupancy.config import load_config
+cfg = load_config()
+t = read_shard(sorted(Path(cfg.gt.output_dir).glob("*.npz"))[0]).target
 
 def size(a, label):
     buf = io.BytesIO()

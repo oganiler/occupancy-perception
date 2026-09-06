@@ -184,7 +184,7 @@ definition of the classes.
   asserts that the table's maximum value is 16, so a future change that
   violated this would fail loudly rather than corrupt the ground truth.
 - `unobserved` is deliberately absent from the class set: it is a mask state,
-  not a class, and is never predicted by the model. See D-00X (loss masking)
+  not a class, and is never predicted by the model. See D-008 (loss masking)
   when that decision is recorded.
 - Adds a dependency on `nuscenes.eval.lidarseg.utils`, an evaluation-side
   module, from the GT generation path. Accepted: the alternative is
@@ -569,3 +569,155 @@ worth more than the pixel efficiency.
 **Revisit if.** The pipeline is ever trained, or results are to be compared
 against published Occ3D-nuScenes numbers. In either case Option A becomes the
 correct choice.
+
+## D-008: Loss masking policy and the camera visibility mask
+
+**Status:** accepted
+
+**Context.**
+The stored target uses 255 for voxels no LiDAR ray determined (D-005). The loss
+must decide what to do with them, and separately whether to restrict
+supervision further to voxels the *cameras* could see.
+
+Occ3D provides two masks. `mask_lidar` marks voxels observed by LiDAR during
+generation; `mask_camera` marks voxels visible to the cameras at the reference
+timestamp. The benchmark evaluates using the camera mask, excluding unobserved
+voxels from the mIoU.
+
+**Decision.**
+1. LiDAR-unobserved voxels are excluded from the loss via `ignore_index=255`.
+2. The camera visibility mask is **not generated** (`gt.generate_camera_mask:
+   false`), and therefore not consumed (`loss.use_camera_mask: false`).
+
+**Rationale for (1).**
+A voxel no ray reached has no measured label. Supervising against a guess would
+put inference into the ground truth, which D-001 exists to avoid. `ignore_index`
+means those positions produce no gradient — the forward pass still emits a
+class there, but nothing corrects it. Unobserved is a mask state, not a class:
+the head has 18 logits and none of them means "unknown" (D-002).
+
+Because the stored sentinel is exactly `ignore_index`, the target array is
+consumed by `F.cross_entropy` with no separate masking step. `config._validate`
+asserts the two constants agree, so a mismatch fails at load rather than
+silently producing a wrong loss.
+
+**Rationale for (2) — and why it is not simply an omission.**
+The camera mask is not a free improvement. SparseOcc report that training two
+BEVFormer variants with and without the visible mask gives the masked version
+15 points *higher* voxel mIoU but 1 point *lower* RayIoU, and attribute this to
+the mask leaving the region behind each surface unsupervised, so the model
+fills it with duplicated predictions and produces a thicker, closer surface.
+
+That is a supervision-policy trade-off, not a data-format detail:
+
+- mask on  -> visible-surface reconstruction. Clean supervision, high voxel
+              mIoU, no amodal reasoning, degraded depth at range.
+- mask off -> scene completion. The model must infer the occluded volume,
+              which is arguably why occupancy is preferred over bounding boxes.
+
+For a ground robot, conservative estimation of occluded volume plausibly
+matters more than voxel-level mIoU. The decision is therefore left open rather
+than settled by default, and the configuration flag exists so it can be
+measured once a model is trained.
+
+**Consequences.**
+- Supervision density varies by sample: measured at 55.5% and 63.5% on two
+  validation batches, and 38.6% mean across the full split (D-005 results). The
+  loss is normalised over supervised voxels only, so this changes the effective
+  batch size rather than the loss scale.
+- The stored `target != 255` is the LiDAR visibility mask, implicit rather than
+  stored separately.
+- Comparing masked and unmasked loss at initialisation is uninformative: with
+  untrained weights the model is uniformly wrong, so the two differ by under
+  0.1% and the sign of the difference varies between runs. The comparison only
+  becomes meaningful after the model has fitted something.
+
+**Revisit if.** A model is trained. Then generate the camera mask and measure
+both policies against RayIoU rather than voxel mIoU, since the latter cannot
+observe the surface-thickening failure.
+
+
+## D-009: Placeholder model architecture
+
+**Status:** accepted
+
+**Context.**
+The brief states that no model need be trained; the deep-learning criterion is
+pipeline design, not model quality. The network must nonetheless be a real
+network: it must consume the batch contract, produce logits matching the target
+grid, and support a loss with gradients reaching every component.
+
+**Decision.** Four injected stages, none of them fixed:
+
+    backbone  ->  view transform  ->  voxel encoder  ->  head
+
+- **backbone**: torchvision ResNet, parametric in name, pretrained flag and
+  output stride. Default `resnet18`, ImageNet weights, stride 16. Shared across
+  all six views by folding the camera axis into the batch.
+- **view transform**: naive backward projection.
+- **voxel encoder**: two 3D convolutions.
+- **head**: 1x1x1 convolution to 18 classes.
+
+**Backward projection over forward projection.**
+Forward projection (Lift-Splat-Shoot) takes a pixel and places its feature in
+3D, which requires predicting *where* — a depth distribution per pixel. That is
+the ill-posed part of monocular vision.
+
+Backward projection takes a voxel centre and finds its pixel. No depth
+prediction is needed, because the 3D location is chosen rather than inferred:
+the grid is the hypothesis space, and "if something were here, which pixel
+would show it?" has one exact answer given K and the extrinsics. Twenty lines of
+geometry instead of a learned depth head.
+
+The cost is depth ambiguity: two voxels at 10 m and 30 m along the same ray
+project to the same pixel and sample the same feature. This is the documented
+weakness of the backward family — dense BEV features, but points along a ray
+acquire indistinctive features. FB-OCC combines both directions for this
+reason.
+
+Both alternatives implement the same `ViewTransform` protocol, so replacing the
+naive transform touches the factory and nothing else.
+
+**Backbone choice.**
+ResNet18 at stride 16, 3.3M parameters total. Selected for CPU forward-pass
+cost, not accuracy. Note that in vision-only 3D perception a larger 2D backbone
+often *overfits* rather than helping, so "bigger is better" does not hold here
+in any case.
+
+ImageNet initialisation is why the Dataset applies ImageNet normalisation; the
+two are coupled and a different pretraining source would require changing both.
+The weights are baked into the container image so inference needs no network,
+verified with `docker run --network none`.
+
+**No training loop.**
+Measured: 37.8 s per optimisation step at batch size 2 on CPU, so one epoch
+over 324 training samples would take 102 minutes. Ten epochs from random 3D
+heads would most likely converge to predicting `free` everywhere, since free is
+the largest supervised class, and produce a near-zero mIoU. The compute buys
+nothing the brief asks for.
+
+Instead the pipeline is verified by fitting a single batch for 20 steps:
+gradient reaches every one of the model's parameter tensors, and the loss falls
+from 2.99 to 1.18. Starting loss agrees with ln(18) = 2.890, which is where an
+untrained 18-class classifier should sit. This demonstrates that the backbone,
+view transform, voxel encoder, head, loss and optimiser are all connected and
+that the mask does not zero the signal — a stronger claim than a partially
+trained model would support, at 13 minutes instead of hours.
+
+**Consequences.**
+- 98.3% of voxels project into at least one camera, so the backbone receives
+  gradient from nearly the whole grid. The remaining 1.7% are supervised by the
+  loss but contribute nothing to backbone learning — a structural property of
+  backward projection, since gradient reaches the backbone only through voxels
+  that land in-frame.
+- Forward pass: 4.4 s at batch 1, 9.1 s at batch 2. Roughly linear, so
+  per-sample cost is dominated by the view transform's per-camera loop rather
+  than by the backbone.
+- Train/validation is split by **scene**, not by sample: 324 train across 8
+  scenes, 80 validation across 2. Keyframes are 0.5 s apart and highly
+  correlated, so a sample-level split would place near-duplicate frames on both
+  sides and report a meaningless validation score. The split is deterministic
+  (last two scenes by name) rather than chosen.
+- `data.num_frames` must be 1; the constructor raises otherwise. The temporal
+  axis is present in the batch and the ego pose is stored in every shard, so
+  temporal fusion is a fusion module rather than a refactor.

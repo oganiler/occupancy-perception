@@ -5,7 +5,8 @@ import numpy as np
 from occupancy.config import load_config
 from occupancy.factory import build_adapter, build_grid_spec, build_voxelizer
 
-cfg = load_config()
+import sys
+cfg = load_config(overrides=sys.argv[1:])
 spec = build_grid_spec(cfg)
 adapter = build_adapter(cfg)
 vox = build_voxelizer(cfg, spec)
@@ -32,8 +33,5 @@ print(f"\nunobserved {u/n:6.1%}   free {f/n:6.1%}   occupied {o/n:6.1%}")
 print(f"semantics present: {sorted(np.unique(sem[state == 2]).tolist())}")
 
 #occupied at 0.8% (5,120 voxels) from 157k points is ~30 points per voxel, which suggests a lot of points fall outside the grid. Expected — your adapter reported x reaching ±96 m — but confirm the fraction rather than assume it:
-in_x = (c.points_m[:,0] >= -40) & (c.points_m[:,0] < 40)
-in_y = (c.points_m[:,1] >= -40) & (c.points_m[:,1] < 40)
-in_z = (c.points_m[:,2] >= -1.0) & (c.points_m[:,2] < 5.4)
-print(f"in grid: {(in_x&in_y&in_z).mean():.1%}   "
-      f"z-crop alone rejects {1-in_z.mean():.1%}")
+idx = np.floor(spec.to_voxel_coords(c.points_m.astype(np.float64))).astype(np.int64)
+print(f"in grid: {spec.in_bounds(idx).mean():.1%}")
