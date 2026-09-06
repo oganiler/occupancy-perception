@@ -5,6 +5,7 @@ import argparse
 import sys
 import time
 from pathlib import Path
+from xml.parsers.expat import model
 
 import numpy as np
 from omegaconf import OmegaConf
@@ -65,7 +66,92 @@ def cmd_gt(args: argparse.Namespace) -> int:
     return 0
 
 def cmd_infer(args: argparse.Namespace) -> int:
-    raise NotImplementedError("DL pipeline not yet implemented")
+    import time
+    import torch
+    from torch.utils.data import DataLoader
+
+    from occupancy.data.dataset import collate
+    from occupancy.factory import build_dataset, build_loss, build_model
+    from occupancy.labels import NUM_CLASSES
+    from occupancy.metrics import voxel_miou
+
+    cfg = load_config(args.config, args.overrides)
+    spec = build_grid_spec(cfg)
+
+    ds = build_dataset(cfg, split="val")
+    dl = DataLoader(ds, batch_size=args.batch_size, collate_fn=collate)
+    model = build_model(cfg, spec)
+    criterion = build_loss(cfg)
+
+    n_params = sum(p.numel() for p in model.parameters())
+    print(f"{ds.__class__.__name__}: {len(ds)} samples")
+    print(f"model: {cfg.model.backbone.name} stride {cfg.model.backbone.out_stride}"
+          f", {n_params/1e6:.1f}M params\n")
+
+    batch = next(iter(dl))
+    model.eval()
+    t0 = time.perf_counter()
+    with torch.no_grad():
+        logits = model(batch)
+    t_fwd = time.perf_counter() - t0
+
+    loss, stats = criterion(logits, batch["target"])
+    print(f"forward       {t_fwd:6.2f} s   {tuple(batch['imgs'].shape)} "
+          f"-> {tuple(logits.shape)}")
+    print(f"visible       {model.last_visible_frac:6.1%} of voxels project "
+          f"into >=1 camera")    
+    print(f"loss (masked)   {loss.item():.4f}")
+    print(f"loss (unmasked) {stats['loss_unmasked']:.4f}"
+          f"   supervised {stats['supervised_frac']:.1%} of voxels")
+
+    m = voxel_miou(logits.argmax(1), batch["target"],
+                   NUM_CLASSES, cfg.loss.ignore_index)
+    print(f"mIoU {m['mIoU']:.4f} over {m['classes_present']} classes "
+          f"(untrained weights)")
+
+    if args.overfit_steps:
+        _overfit(model, criterion, batch, args.overfit_steps)
+    return 0
+
+
+def _overfit(model, criterion, batch, steps: int) -> None:
+    """Fit one sample to prove gradients reach every component.
+
+    Not training: this is a wiring check. A falling loss demonstrates that the
+    backbone, view transform, voxel encoder and head all receive usable
+    gradient, and that the mask does not zero the signal.
+    """
+    import time
+    import torch
+
+    model.train()
+    opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+    print(f"\noverfitting one batch for {steps} steps (wiring check)")
+
+    t0 = time.perf_counter()
+    for i in range(steps):
+        opt.zero_grad()
+        loss, _ = criterion(model(batch), batch["target"])
+        loss.backward()
+
+        if i == 0:
+            missing = [n for n, p in model.named_parameters()
+                       if p.requires_grad and (p.grad is None or
+                                               p.grad.abs().sum() == 0)]
+            print(f"  parameters with no gradient: {len(missing)}")
+            for n in missing[:5]:
+                print(f"    {n}")
+        opt.step()
+
+        if i % 5 == 0 or i == steps - 1:
+            print(f"  step {i:3d}   loss {loss.item():.4f}")
+
+    total = sum(1 for _, p in model.named_parameters() if p.requires_grad)
+    print(f"  gradient reached {total - len(missing)}/{total} parameter tensors")
+
+    dt = time.perf_counter() - t0
+    print(f"\n{dt/steps:.1f} s/step -> one epoch over 324 samples "
+          f"at batch 2 would take {dt/steps*162/60:.0f} min")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -81,6 +167,8 @@ def main(argv: list[str] | None = None) -> int:
     g.set_defaults(func=cmd_gt)
 
     i = sub.add_parser("infer", help="forward pass and loss")
+    i.add_argument("--batch-size", type=int, default=2)
+    i.add_argument("--overfit-steps", type=int, default=0)
     i.add_argument("overrides", nargs="*")
     i.set_defaults(func=cmd_infer)
 

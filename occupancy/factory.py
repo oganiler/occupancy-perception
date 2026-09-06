@@ -60,3 +60,30 @@ def build_dataset(cfg: DictConfig, split: str = "train"):
         num_frames=cfg.data.num_frames,
         split=split,
     )
+
+def build_model(cfg: DictConfig, spec: GridSpec):
+    from occupancy.models.backbone import ImageBackbone
+    from occupancy.models.occupancy_net import OccupancyNet
+    from occupancy.models.view_transform import NaiveProjection
+
+    backbone = ImageBackbone(
+        name=cfg.model.backbone.name,
+        pretrained=cfg.model.backbone.pretrained,
+        out_stride=cfg.model.backbone.out_stride,
+    )
+    if cfg.model.view_transform != "naive":
+        raise NotImplementedError(
+            f"view_transform={cfg.model.view_transform!r} not implemented; "
+            "'lss' and 'deformable_attention' plug in behind the same protocol"
+        )
+    return OccupancyNet(
+        backbone=backbone,
+        view_transform=NaiveProjection(tuple(cfg.data.image_size)),
+        spec=spec,
+        hidden_channels=cfg.model.hidden_channels,
+    )
+
+
+def build_loss(cfg: DictConfig):
+    from occupancy.models.loss import MaskedCrossEntropy
+    return MaskedCrossEntropy(ignore_index=cfg.loss.ignore_index)

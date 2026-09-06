@@ -61,3 +61,11 @@ data:
 loss:
   use_camera_mask: false                # requires gt.generate_camera_mask
   ignore_index: 255
+
+model:
+  backbone:
+    name: resnet18          # resnet18 | resnet34 | resnet50
+    pretrained: true        # ImageNet init; Dataset normalisation assumes this
+    out_stride: 16          # 8 | 16 | 32
+  view_transform: naive     # naive | lss | deformable_attention
+  hidden_channels: 64  

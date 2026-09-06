@@ -57,11 +57,25 @@ class LossConfig:
 
 
 @dataclass
+class BackboneConfig:
+    name: str = "resnet18"          # resnet18 | resnet34 | resnet50
+    pretrained: bool = True         # ImageNet init; Dataset normalisation assumes this
+    out_stride: int = 16            # 8 | 16 | 32
+
+
+@dataclass
+class ModelConfig:
+    backbone: BackboneConfig = field(default_factory=BackboneConfig)
+    view_transform: str = "naive"   # naive | lss | deformable_attention
+    hidden_channels: int = 64
+
+@dataclass
 class Config:
     dataset: DatasetConfig = field(default_factory=DatasetConfig)
     grid: GridConfig = field(default_factory=GridConfig)
     gt: GTConfig = field(default_factory=GTConfig)
     data: DataConfig = field(default_factory=DataConfig)
+    model: ModelConfig = field(default_factory=ModelConfig)
     loss: LossConfig = field(default_factory=LossConfig)
 
 
