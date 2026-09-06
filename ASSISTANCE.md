@@ -16,6 +16,7 @@
 | Amanatides-Woo traversal | Cited | Assisted | Algorithm is published prior work (see references). The `_dda` implementation in reference.py was drafted with LLM assistance, then reviewed and understood in detail — I can explain the t_max / t_delta setup, why the traversal runs in voxel coordinates, and why termination at t > 1.0 needs no epsilon. |
 | Voxelizer tests | Assisted | Assisted | Test cases proposed and written with assistance; the properties they pin (precedence, determinism) follow from D-003, which is mine. |
 | Non-keyframe free-space aggregation (D-001 Refinement) | Me | Me | My observation that free space needs no semantic label, so non-keyframe sweeps are usable for traversal even though lidarseg annotates keyframes only. I also identified that the existing two-pass ordering already makes endpoint handling unnecessary — the LLM had proposed three schemes for marking or suppressing non-keyframe endpoints, all of which the pass structure makes moot. The ordering guard (pass 3 last, writing only into UNOBSERVED) was suggested in review to avoid free space being carved through the interior of moving objects. |
+| Image resize strategy (D-007) | Me | Assisted | Options and their intrinsic-correction cost were laid out with LLM assistance; the choice of Option B, and the reasoning that reduced silent-failure surface outweighs pixel efficiency when no training occurs, is mine. I can explain why resizing without adjusting K produces a silently wrong projection rather than an error. |
 
 ## Algorithms and prior work
 

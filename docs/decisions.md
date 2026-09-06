@@ -496,3 +496,76 @@ not a bottleneck at this dataset size (404 samples ≈ 27 minutes).
 
 **Consequences.** The parameter remains in the configuration as a knob for
 larger datasets, where the absolute time saving would matter more.
+
+## D-007: Aspect-preserving image resize over the benchmark crop convention
+
+**Status:** accepted
+
+**Context.**
+nuScenes cameras are 1600 x 900. Six images per keyframe at full resolution is
+too expensive for CPU-only inference, so the DL pipeline must downscale. Any
+change to image geometry must be matched by a corresponding change to the
+camera intrinsics, because the view transform projects 3D voxel centres into
+image coordinates using K. An unadjusted K produces a projection that samples
+the wrong pixels: nothing raises, nothing crashes, and the output looks
+approximately correct.
+
+**Options.**
+- A. Crop-and-resize to 256 x 704, the BEVDet-family convention. Resize by
+     704/1600 = 0.44, then crop 140 rows from the top to keep the bottom 256.
+- B. Aspect-preserving resize to 288 x 512. Scale 512/1600 = 0.32 exactly,
+     giving 900 x 0.32 = 288 exactly.
+
+**Decision.** Option B, 288 x 512.
+
+**Rationale.**
+Option A requires two intrinsic corrections: focal length and principal point
+scale with the resize, and the principal point shifts again by the crop offset.
+
+    K[0,0] *= s ; K[1,1] *= s
+    K[0,2] *= s ; K[1,2] *= s
+    K[1,2] -= crop_top
+
+Option B requires one:
+
+    K[:2, :] *= s
+
+Halving the number of independent corrections halves the opportunities for a
+silent projection error, which is the dominant failure mode in this part of the
+pipeline. The crop offset in particular is a constant that must agree between
+the image transform and the intrinsic adjustment, with nothing enforcing that
+agreement.
+
+The chosen resolution is not arbitrary. 0.32 maps 1600 -> 512 and 900 -> 288
+with no rounding, preserving the native 16:9 aspect exactly, so no distortion
+is introduced. Both dimensions are divisible by 32, so standard backbone stride
+sequences divide cleanly and no padding is needed.
+
+Option B is also 18% cheaper: 147,456 pixels per image against 180,224.
+
+**What is given up.**
+The crop in Option A is not merely a convention. It removes sky, which cannot
+contain an occupied voxel given the grid's z range of [-1, 5.4] m, so Option A
+spends its pixel budget more usefully. Option B retains those rows and wastes
+some capacity on them.
+
+That trade-off favours Option A when training, where pixel efficiency
+translates into accuracy per unit compute. It does not apply here: no model is
+trained (per the assignment brief), and no results are compared against
+published benchmark numbers, so conformance to the BEVDet convention buys
+nothing. Under those conditions the reduction in silent-failure surface is
+worth more than the pixel efficiency.
+
+**Consequences.**
+- `data.image_size: [288, 512]` (H, W) in configuration.
+- Intrinsic adjustment is a single scale, applied in the Dataset alongside the
+  resize, so the two cannot be applied independently of one another.
+- A unit test asserts that a known 3D point projects to the same normalised
+  image location before and after resize, which is the property that actually
+  matters and which no amount of shape checking would catch.
+- Switching to Option A later means adding the crop and its principal-point
+  offset in one place; nothing downstream depends on the resolution.
+
+**Revisit if.** The pipeline is ever trained, or results are to be compared
+against published Occ3D-nuScenes numbers. In either case Option A becomes the
+correct choice.

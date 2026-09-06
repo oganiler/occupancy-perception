@@ -49,7 +49,7 @@ gt:
 # ---------------------------------------------------------------------------
 data:
   num_frames: 1                         # temporal axis; >1 enables temporal fusion
-  image_size: [256, 704]                # downscaled from 900x1600 for CPU
+  image_size: [288, 512]                # # H, W. Exact 16:9 from 900x1600, scale 0.32
   cameras:
     - CAM_FRONT
     - CAM_FRONT_RIGHT

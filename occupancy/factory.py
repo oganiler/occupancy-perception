@@ -35,7 +35,6 @@ def build_adapter(cfg: DictConfig) -> NuScenesAdapter:
         free_sweep_stride=cfg.gt.free_sweep_stride,
     )
 
-
 def build_voxelizer(cfg: DictConfig, spec: GridSpec) -> VoxelizerBackend:
     if cfg.gt.backend == "python":
         from occupancy.gt.backends.reference import ReferenceVoxelizer
@@ -50,3 +49,14 @@ def build_voxelizer(cfg: DictConfig, spec: GridSpec) -> VoxelizerBackend:
         )
 
     raise ValueError(f"unknown backend: {cfg.gt.backend!r}")
+
+def build_dataset(cfg: DictConfig, split: str = "train"):
+    from occupancy.data.dataset import OccupancyDataset
+    return OccupancyDataset(
+        shard_dir=cfg.gt.output_dir,
+        dataroot=cfg.dataset.root,
+        image_size=tuple(cfg.data.image_size),
+        cameras=tuple(cfg.data.cameras),
+        num_frames=cfg.data.num_frames,
+        split=split,
+    )
