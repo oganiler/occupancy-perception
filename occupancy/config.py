@@ -32,6 +32,7 @@ class GTConfig:
     separate_dynamic: bool = True
     min_distance_m: float = 1.0
     free_ray_stride: int = 1                 # 1 = every ray; >1 subsamples
+    free_sweep_stride: int = 0
     backend: str = "python"                  # python | cpp
     generate_camera_mask: bool = False
     output_dir: str = "/workspace/gt_shards"
@@ -120,3 +121,6 @@ def _validate(cfg: DictConfig) -> None:
             f"loss.ignore_index ({cfg.loss.ignore_index}) must equal the shard "
             f"sentinel ({UNOBSERVED_LABEL})"
         )
+
+    if cfg.gt.free_sweep_stride < 0:
+        raise ValueError("gt.free_sweep_stride must be >= 0 (0 disables)")    

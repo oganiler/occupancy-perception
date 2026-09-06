@@ -26,6 +26,7 @@ def cmd_gt(args: argparse.Namespace) -> int:
     OmegaConf.save(cfg, out_dir / "config.snapshot.yaml")
 
     tokens = adapter.sample_tokens()
+    tokens = tokens[args.start:]
     if args.num_samples:
         tokens = tokens[: args.num_samples]
 
@@ -40,6 +41,8 @@ def cmd_gt(args: argparse.Namespace) -> int:
         state, sem = vox.build(
             c.points_m, c.labels, c.sensor_origins_m,
             (~c.in_annotated_box) | c.from_reference,      # D-003
+            extra_free_points_m=c.free_only_points_m,
+            extra_free_origins_m=c.free_only_origins_m,
         )
         path = write_shard(out_dir, sample, to_target(state, sem), cfg.dataset.root)
         total_bytes += path.stat().st_size
@@ -71,6 +74,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = p.add_subparsers(dest="command", required=True)
 
     g = sub.add_parser("gt", help="generate occupancy ground-truth shards")
+    g.add_argument("--start", type=int, default=0,
+                   help="index of the first sample to process")    
     g.add_argument("--num-samples", type=int, default=None)
     g.add_argument("overrides", nargs="*", help="e.g. gt.window_keyframes=8")
     g.set_defaults(func=cmd_gt)

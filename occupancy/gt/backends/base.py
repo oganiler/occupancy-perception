@@ -21,6 +21,8 @@ class VoxelizerBackend(Protocol):
         labels: np.ndarray,            # (N,)   uint8, Occ3D 0..16
         sensor_origins_m: np.ndarray,  # (N, 3) float32, ego frame
         cast_free_ray: np.ndarray,     # (N,)   bool, see D-003
+        extra_free_points_m: np.ndarray | None = None,
+        extra_free_origins_m: np.ndarray | None = None,        
     ) -> tuple[np.ndarray, np.ndarray]:
         """Returns (state, semantics), each (nx, ny, nz) uint8.
 

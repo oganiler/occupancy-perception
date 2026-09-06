@@ -31,6 +31,8 @@ class ReferenceVoxelizer:
         labels: np.ndarray,
         sensor_origins_m: np.ndarray,
         cast_free_ray: np.ndarray,
+        extra_free_points_m: np.ndarray | None = None,      # (M, 3)
+        extra_free_origins_m: np.ndarray | None = None,     # (M, 3)        
     ) -> tuple[np.ndarray, np.ndarray]:
         nx, ny, nz = self.spec.dims
         state = np.full(self.spec.num_voxels, UNOBSERVED, dtype=np.uint8)
@@ -45,20 +47,40 @@ class ReferenceVoxelizer:
             _dda(starts[i], ends[i], state, nx, ny, nz, max_steps)
 
         # ---- pass 2: endpoints, vectorised ------------------------------
-        vox = np.floor(ends).astype(np.int64)                  # (N, 3)
-        ok = self.spec.in_bounds(vox)
+        vox = np.floor(ends).astype(np.int64)                  # (N, 3) all points at once
+        ok = self.spec.in_bounds(vox)                          # (N,)    all bounds checks
         vox, lab = vox[ok], labels[ok]
-        flat = (vox[:, 0] * ny + vox[:, 1]) * nz + vox[:, 2]    # (M,)
+        flat = (vox[:, 0] * ny + vox[:, 1]) * nz + vox[:, 2]    # (M,)  3D index -> 1D
 
-        state[flat] = OCCUPIED
+        state[flat] = OCCUPIED # one scattered write
 
         votes = np.zeros((self.spec.num_voxels, _NUM_SEMANTIC), dtype=np.uint16)
-        np.add.at(votes, (flat, lab), 1)
+        np.add.at(votes, (flat, lab), 1) # one scattered accumulate
 
         semantics = np.full(self.spec.num_voxels, FREE_CLASS, dtype=np.uint8)
         occ = np.flatnonzero(state == OCCUPIED)
         # np.argmax breaks ties toward the lowest class index -> deterministic.
         semantics[occ] = votes[occ].argmax(axis=1).astype(np.uint8)
+
+        # ---- pass 3: non-keyframe free space (D-001 refinement) ----------
+        # Additive by construction: _dda only fills UNOBSERVED voxels, so this
+        # cannot contradict pass 1 or pass 2 regardless of ordering.
+        if extra_free_points_m is not None or extra_free_origins_m is not None:
+            if extra_free_points_m is None or extra_free_origins_m is None:
+                raise ValueError(
+                    "extra_free_points_m and extra_free_origins_m must be "
+                    "given together"
+                )
+            if len(extra_free_points_m) != len(extra_free_origins_m):
+                raise ValueError(
+                    f"length mismatch: {len(extra_free_points_m)} points vs "
+                    f"{len(extra_free_origins_m)} origins"
+                )
+
+            s2 = self.spec.to_voxel_coords(extra_free_origins_m.astype(np.float64))
+            e2 = self.spec.to_voxel_coords(extra_free_points_m.astype(np.float64))
+            for i in range(len(e2)):
+                _dda(s2[i], e2[i], state, nx, ny, nz, max_steps)    
 
         return (
             state.reshape(nx, ny, nz),
@@ -98,7 +120,8 @@ def _dda(o: np.ndarray, e: np.ndarray, state: np.ndarray,
             return
         if 0 <= ix < nx and 0 <= iy < ny and 0 <= iz < nz:
             flat = (ix * ny + iy) * nz + iz
-            state[flat] = FREE
+            if state[flat] == UNOBSERVED:
+                state[flat] = FREE
 
         axis = 0 if t_max[0] <= t_max[1] and t_max[0] <= t_max[2] else (
             1 if t_max[1] <= t_max[2] else 2

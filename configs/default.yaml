@@ -36,6 +36,12 @@ gt:
                          # adjacent rays traverse nearly the same voxels, so
                          # this trades free-space coverage for runtime.  
 
+  # Non-keyframe sweeps used for free-space rays only (D-001 refinement).
+  # 0 disables. N takes every Nth non-keyframe sweep in the window; each
+  # retained sweep is complete, so unlike ray-level striding (D-006) this
+  # does not perforate free space.
+  free_sweep_stride: 0  #Cost is roughly constant (~3x the ray count even with stride=5) while benefit scales with motion                       
+
   output_dir: /workspace/gt_shards
 
 # ---------------------------------------------------------------------------

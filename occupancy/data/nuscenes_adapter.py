@@ -23,7 +23,7 @@ from pyquaternion import Quaternion
 from occupancy.labels import build_fine_to_occ3d_lut, remap_labels
 
 LIDAR_CHANNEL = "LIDAR_TOP"
-
+LIDAR_SWEEPS_PER_KEYFRAME = 10   # 20 Hz LiDAR against 2 Hz keyframes. For Non-Key Frames
 
 @dataclass(frozen=True)
 class AggregatedCloud:
@@ -34,6 +34,11 @@ class AggregatedCloud:
     sensor_origins_m: np.ndarray   # (N, 3) float32, ray origin per point
     in_annotated_box: np.ndarray         # (N,)   bool, point was inside an annotated box
     from_reference: np.ndarray     # (N,)   bool, point came from the reference sweep
+    # Non-keyframe sweep rays: traversal only, endpoints never cast.
+    # No labels, because a traversed voxel is class 17 regardless of what the
+    # beam eventually struck.
+    free_only_points_m: np.ndarray    # (M, 3) float32
+    free_only_origins_m: np.ndarray   # (M, 3) float32    
 
     def __len__(self) -> int:
         return int(self.points_m.shape[0])
@@ -76,18 +81,97 @@ class NuScenesAdapter:
         min_distance_m: float,
         separate_dynamic: bool,
         camera_names: tuple[str, ...],
+        free_sweep_stride: int,
     ) -> None:
         self.nusc = NuScenes(version=version, dataroot=dataroot, verbose=False)
         self.window_keyframes = window_keyframes
         self.min_distance_m = min_distance_m
         self.separate_dynamic = separate_dynamic
         self.camera_names = camera_names
+        self.free_sweep_stride = free_sweep_stride
         self._lut = build_fine_to_occ3d_lut(self.nusc)   # (32,) uint8, built once
 
     # -- public ------------------------------------------------------------
 
     def sample_tokens(self) -> list[str]:
         return [s["token"] for s in self.nusc.sample]
+
+    def _sweep_to_ref(
+        self, sd_token: str, T_egoref_from_global: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Load one LiDAR sweep into the reference ego frame.
+
+        Returns (points (3, N) float64, sensor origin (3,) float64).
+        Shared by keyframe and non-keyframe loading; only the label handling
+        differs between them.
+        """
+        sd = self.nusc.get("sample_data", sd_token)
+        pc = LidarPointCloud.from_file(
+            os.path.join(self.nusc.dataroot, sd["filename"])
+        )
+        pts = pc.points[:3, :]
+
+        keep = np.linalg.norm(pts[:2, :], axis=0) >= self.min_distance_m
+        pts = pts[:, keep]
+
+        cs = self.nusc.get("calibrated_sensor", sd["calibrated_sensor_token"])
+        pose = self.nusc.get("ego_pose", sd["ego_pose_token"])
+        T_global_from_lidar = (
+            transform_matrix(np.array(pose["translation"]),
+                             Quaternion(pose["rotation"]))
+            @ transform_matrix(np.array(cs["translation"]),
+                               Quaternion(cs["rotation"]))
+        )
+        T = T_egoref_from_global @ T_global_from_lidar
+        return _apply(T, pts), T[:3, 3]    
+
+    def _nonkeyframe_rays(
+        self, ref_sd_token: str, T_egoref_from_global: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Free-space rays from non-keyframe sweeps in the aggregation window.
+
+        These sweeps carry no lidarseg labels, but free space needs none: a
+        traversed voxel is class 17 whatever the beam struck. Their endpoints
+        are never cast, so no unlabelled-occupied voxel is ever created.
+
+        Dynamic objects are not corrected here -- annotations exist only on
+        keyframes. The voxelizer's UNOBSERVED-only guard prevents these rays
+        from contradicting the box-corrected occupancy pass 2 writes.
+        """
+        empty = np.zeros((0, 3), np.float32)
+        if self.free_sweep_stride <= 0:
+            return empty, empty
+
+        span = self.window_keyframes * LIDAR_SWEEPS_PER_KEYFRAME
+        tokens: list[str] = []
+        for direction in ("prev", "next"):
+            found: list[str] = []
+            tok = self.nusc.get("sample_data", ref_sd_token)[direction]
+            for _ in range(span):
+                if not tok:
+                    break
+                sd = self.nusc.get("sample_data", tok)
+                if not sd["is_key_frame"]:
+                    found.append(tok)
+                tok = sd[direction]
+            # Stride within each direction so the sampling stays symmetric
+            # about the reference keyframe.
+            tokens.extend(found[:: self.free_sweep_stride])
+
+        if not tokens:
+            return empty, empty
+
+        pts_all, org_all = [], []
+        for tok in tokens:
+            pts, origin = self._sweep_to_ref(tok, T_egoref_from_global)
+            n = pts.shape[1]
+            pts_all.append(pts.T)
+            org_all.append(np.repeat(origin.reshape(1, 3), n, axis=0))
+
+        return (
+            np.concatenate(pts_all).astype(np.float32),
+            np.concatenate(org_all).astype(np.float32),
+        )    
 
     def get(self, sample_token: str) -> SampleData:
         ref_sample = self.nusc.get("sample", sample_token)
@@ -112,12 +196,18 @@ class NuScenesAdapter:
             for tok in window
         ] 
 
+        free_pts, free_org = self._nonkeyframe_rays(
+            ref_sd_token, T_egoref_from_global
+        )
+
         cloud = AggregatedCloud(
             points_m=np.concatenate([c[0] for c in chunks]).astype(np.float32),
             labels=np.concatenate([c[1] for c in chunks]).astype(np.uint8),
             sensor_origins_m=np.concatenate([c[2] for c in chunks]).astype(np.float32),
             in_annotated_box=np.concatenate([c[3] for c in chunks]),
             from_reference=np.concatenate([c[4] for c in chunks]),
+            free_only_points_m=free_pts,
+            free_only_origins_m=free_org,
         )     
 
         scene = self.nusc.get("scene", ref_sample["scene_token"])

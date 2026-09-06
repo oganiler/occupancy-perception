@@ -62,6 +62,82 @@ Displacement explains about 45% of the variance in coverage; the remainder is
 environmental, since scene-1100 is also stationary (0.2 m) yet reaches 67%
 rather than 81%.
 
+**Refinement: non-keyframe sweeps for free space only.**
+
+The keyframe-only restriction is driven by *labels*, and labels are needed only
+at ray endpoints. A traversed voxel is class 17 (`free`) regardless of what the
+beam eventually struck. Non-keyframe sweeps are therefore usable for free-space
+determination even though nuScenes-lidarseg annotates keyframes only.
+
+This targets the measured bottleneck directly. Coverage is parallax-limited
+(r = -0.673 against ego displacement over the window), and at 20 Hz the ego is
+sampled roughly every 0.5 m rather than every 5 m, so the inter-beam ring gaps
+are filled at far finer granularity. Free space is 35.6% of the grid and
+carries essentially all of the coverage variance; occupied is 3.0% and is
+already saturated from keyframes alone.
+
+Implemented as a third pass, ordered last:
+
+    pass 1  free space from keyframe rays          -> FREE
+    pass 2  keyframe endpoints and semantic votes  -> OCCUPIED
+    pass 3  free space from non-keyframe rays      -> FREE, only where UNOBSERVED
+
+Endpoints of non-keyframe rays are simply not cast. No fourth state, no
+unlabelled-occupied voxel, no additional sentinel.
+
+The `UNOBSERVED`-only guard in pass 3, and its placement after pass 2 rather
+than before pass 1, prevent a specific error. A moving vehicle occupies volume
+at t_ref that was empty air two seconds earlier, so a non-keyframe beam passed
+straight through it. Marking those voxels free would contradict the
+box-corrected occupancy that pass 2 writes there (D-003). Because LiDAR returns
+only from an object's near surface, pass 2 marks a shell; running pass 3 first
+would leave free space inside that shell — a hollow vehicle. The guard makes
+pass 3 strictly additive: it can only fill voxels that no keyframe measurement
+determined, and can never contradict one.
+
+Residual limitation: voxels inside a moving object's volume that no keyframe
+endpoint reached remain incorrectly free. This is bounded by the object's
+surface sampling density and has not been quantified.
+
+**Attribution.** This refinement was proposed by the author. The ordering guard
+was added in review. See ASSISTANCE.md.
+
+**Measured, and its boundary.Result Of The Refinement**
+
+| Scene | window displacement | unobserved, stride 0 | stride 5 | gain | s/sample |
+|---|---|---|---|---|---|
+| scene-0061 | 17.7 m | 49.9% | 43.9% | 6.0 pts | 3.8 -> ~11 |
+| scene-0553 | 0.0 m | 81.2% | 80.0% | 1.2 pts | 7.7 -> 22.5 |
+
+The initial expectation was that pass 3 would help *most* where parallax is
+absent. The measurement refutes this: the stationary scene gained five times
+less at three times the cost.
+
+The reason refines the mechanism. Non-keyframe sweeps are taken from wherever
+the ego was at that instant. For a stationary vehicle they originate at the
+same position, so the same 32 beams strike the same 32 ground radii and the
+inter-beam gaps are geometrically unreachable. Pass 3 supplies additional
+*timesteps*, which become additional *viewpoints* only in proportion to ego
+motion. It multiplies existing parallax; it cannot create parallax.
+
+Cost is roughly constant (~3x the ray count) while benefit scales with motion,
+so the return is worst exactly where coverage is worst.
+
+This independently confirms the stationary limitation recorded above: for
+samples with no ego motion, no amount of additional ray casting helps. Only
+label propagation (Option B) or mesh-based hole filling would.
+
+**Shipped configuration:** `free_sweep_stride: 0`. The capability is
+implemented and covered by tests (`test_pass3_only_fills_unobserved`,
+`test_pass3_fills_untouched_voxels`), and left disabled because a ~2 hour
+regeneration for ~4 points averaged across the split was not the best use of
+the remaining time. Enabling it is a one-line configuration change.
+
+**Guard verified empirically.** The `occupied` fraction is byte-identical
+across all strides in both scenes (3.3% and 1.0% respectively, including min
+and max), confirming that pass 3 never overwrites an occupied voxel across
+~12.8 million voxels — the property the unit tests pin on five.
+
 ## D-002: Occ3D-nuScenes class set, derived from the devkit's coarse mapping
 
 **Status:** accepted
@@ -300,6 +376,18 @@ occupied (D-003).
   traverse nearly identical voxel sets. Currently 1.
 - Behaviour is pinned by tests: axis-aligned traversal, the no-free-ray path,
   out-of-bounds cropping, and bit-exact determinism across runs.
+
+**Note on what was strided.** `free_ray_stride` subsamples the flat aggregated
+point array, not LiDAR beams. Points arrive in acquisition order across nine
+concatenated sweeps, already filtered by range and by the D-003 dynamic mask,
+so striding removes rays scattered arbitrarily across beams, azimuths and
+sweeps rather than dropping whole beams. This is why free space perforates into
+speckle rather than thinning into a coarser but still-solid ring pattern.
+
+Structured beam-level subsampling would likely degrade more gracefully. It was
+not implemented: nuScenes does not publish per-point ring indices, so beams
+would have to be recovered by clustering elevation angles, and the parameter
+has been rejected on other grounds regardless.  
 
 **Attribution.** The algorithm is published prior work, cited above and in
 ASSISTANCE.md. The implementation in `occupancy/gt/backends/reference.py` is

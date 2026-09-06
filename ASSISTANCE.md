@@ -15,6 +15,7 @@
 | Voxelizer pass structure | Me | Assisted | Two-pass design chosen so occupied-beats-free is structural rather than order-dependent (D-003). Reasoning is mine; code drafted with assistance. |
 | Amanatides-Woo traversal | Cited | Assisted | Algorithm is published prior work (see references). The `_dda` implementation in reference.py was drafted with LLM assistance, then reviewed and understood in detail — I can explain the t_max / t_delta setup, why the traversal runs in voxel coordinates, and why termination at t > 1.0 needs no epsilon. |
 | Voxelizer tests | Assisted | Assisted | Test cases proposed and written with assistance; the properties they pin (precedence, determinism) follow from D-003, which is mine. |
+| Non-keyframe free-space aggregation (D-001 Refinement) | Me | Me | My observation that free space needs no semantic label, so non-keyframe sweeps are usable for traversal even though lidarseg annotates keyframes only. I also identified that the existing two-pass ordering already makes endpoint handling unnecessary — the LLM had proposed three schemes for marking or suppressing non-keyframe endpoints, all of which the pass structure makes moot. The ordering guard (pass 3 last, writing only into UNOBSERVED) was suggested in review to avoid free space being carved through the interior of moving objects. |
 
 ## Algorithms and prior work
 

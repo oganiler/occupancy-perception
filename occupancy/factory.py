@@ -32,6 +32,7 @@ def build_adapter(cfg: DictConfig) -> NuScenesAdapter:
         min_distance_m=cfg.gt.min_distance_m,
         separate_dynamic=cfg.gt.separate_dynamic,
         camera_names=tuple(cfg.data.cameras),
+        free_sweep_stride=cfg.gt.free_sweep_stride,
     )
 
 
