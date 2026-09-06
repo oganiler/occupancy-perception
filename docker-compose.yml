@@ -13,7 +13,14 @@ services:
       # Dataset stays outside the image. Read-only: GT generation must
       # never be able to modify the raw data.
       - ${NUSCENES_ROOT:-${HOME}/data/nuscenes}:/data/nuscenes:ro
+      # Named volume so the torchvision weight cache survives --rm containers.
+      - torch-cache:/home/dev/.cache/torch
     environment:
       NUSCENES_ROOT: /data/nuscenes
     stdin_open: true
     tty: true
+
+# Named volumes must be declared at the top level. Bind mounts do not,
+# because the host path already exists.
+volumes:
+  torch-cache:    

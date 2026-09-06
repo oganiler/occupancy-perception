@@ -47,4 +47,9 @@ ARG GID=1000
 RUN groupadd -g ${GID} dev && useradd -m -u ${UID} -g ${GID} -s /bin/bash dev
 USER dev
 
+# Pre-fetch ImageNet weights so the container needs no network at run time.
+# Must come after USER dev: torchvision caches into $HOME, and downloading as
+# root would leave the file in /root/.cache where the dev user cannot read it.
+RUN python -c "import torchvision; torchvision.models.resnet18(weights='IMAGENET1K_V1')"
+
 CMD ["bash"]
