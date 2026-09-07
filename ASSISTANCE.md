@@ -47,6 +47,7 @@ output.
 | **D-005** shard format | **Me** | Assisted | Deferred the format choice until the storage-layout measurement was available; chose the single-array sentinel so the stored array *is* the cross-entropy target |
 | **D-006** `free_ray_stride` rejected | **Me** | Assisted | Measurement designed jointly; the interpretation that ray-level striding perforates free space into higher-entropy speckle, and that this is why files grow, was worked out in discussion |
 | Voxelizer tests | Assisted | Assisted | Cases proposed and drafted with assistance; the properties they pin (precedence, determinism, the pass-3 guard) follow from decisions that are mine |
+| **D-010** channel reduction before lifting | Assisted | Assisted | The LLM first proposed batching the per-camera loop and fusing the projection matrices, arguing from operation counts. Profiling showed that target was 0.03% of the forward pass. The channel reduction was then identified from the measurement. Recorded here because the initial analysis was wrong and the profile, not the argument, chose the fix |
 
 ### Deep learning pipeline
 
@@ -128,6 +129,13 @@ what the report states.
   position and strike the same beam radii.
 - **`docker system prune -a` recommended** for a clean-build check, which would
   have discarded cached base layers and dependency downloads for no benefit.
+- **View-transform optimisation proposed from operation counts rather than a
+  profile.** Batching the per-camera loop and fusing K with the inverse
+  extrinsics was recommended on a FLOP argument. The profile showed
+  `linalg_inv` at 0.03% and negligible dispatch overhead; the proposed
+  vectorisation would also have allocated ~7.9 GB in a single tensor at the
+  then-current channel count. The actual cost was channel count in
+  `grid_sample`.  
 
 ## Open-source libraries and prior work
 

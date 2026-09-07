@@ -80,6 +80,7 @@ def build_model(cfg: DictConfig, spec: GridSpec):
         backbone=backbone,
         view_transform=NaiveProjection(tuple(cfg.data.image_size)),
         spec=spec,
+        lift_channels=cfg.model.lift_channels,
         hidden_channels=cfg.model.hidden_channels,
     )
 

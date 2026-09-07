@@ -68,4 +68,8 @@ model:
     pretrained: true        # ImageNet init; Dataset normalisation assumes this
     out_stride: 16          # 8 | 16 | 32
   view_transform: naive     # naive | lss | deformable_attention
+  lift_channels: 64         # <- add. Channels carried into the view transform.
+                            # grid_sample and the elementwise accumulate both
+                            # scale linearly with this; together they are ~59%
+                            # of the forward pass (see scripts/profile_forward.py)  
   hidden_channels: 64  

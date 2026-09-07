@@ -324,6 +324,12 @@ Measured cost of training: **37.8 s per step** at batch size 2 on CPU, so one
 epoch over 324 samples takes **102 minutes**. Ten epochs from random 3D heads
 would most likely converge to predicting `free` everywhere.
 
+```
+Note that the step cost above was measured before the channel reduction of
+D-010, which cut the forward pass from 3.95 s to 1.51 s. The training estimate
+should be read as an order of magnitude rather than a current figure.
+```
+
 Instead: fit one batch for 20 steps. **Gradient reaches every parameter tensor**
 and loss falls **2.99 → 1.18**, with the initial value agreeing with
 ln(18) = 2.890. That demonstrates backbone, view transform, voxel encoder, head,
@@ -415,3 +421,11 @@ Measurements repeatedly overturned plausible explanations — voxelizer runtime 
 20×, coverage variance attributed to the wrong cause, the non-keyframe pass
 predicted to help most where it helped least. The numbers in this report are the
 measurements, and where a prediction was wrong, the report says so.
+
+**Optimise from a profile, not from where the code looks slow.** The
+per-camera loop in the view transform was the obvious target, and the natural
+fix was to batch it and fuse the projection matrices. Profiling showed that the
+matrix algebra was 0.03% of the forward pass and that dispatch overhead was
+negligible against six calls of 66 ms each. The cost was channel count, not
+loop structure. A one-line channel reduction removed 59% of the pass; the
+batching would have removed nothing and quadrupled peak memory (D-010).

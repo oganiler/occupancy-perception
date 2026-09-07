@@ -721,3 +721,49 @@ trained model would support, at 13 minutes instead of hours.
 - `data.num_frames` must be 1; the constructor raises otherwise. The temporal
   axis is present in the batch and the ego pose is stored in every shard, so
   temporal fusion is a fusion module rather than a refactor.
+
+## D-010: Channel reduction before the view transform
+
+**Status:** accepted
+
+**Context.**
+The forward pass took 3.95 s at batch size 1 on CPU, which is slow for an
+interactive demonstration and makes the single-batch wiring check (D-009)
+unnecessarily long.
+
+**Measurement first.** Profiling with `scripts/profile_forward.py` rather than
+reasoning about where the cost appeared to be:
+
+| Operation | Self CPU | Share | Allocation |
+|---|---|---|---|
+| `aten::grid_sampler_2d` | 1.583 s | 44% | 3.66 GB |
+| `aten::mkldnn_convolution` | 1.238 s | 35% | 0.52 GB |
+| `aten::mul` + `aten::add_` | 0.520 s | 15% | 3.69 GB |
+| `aten::linalg_inv` | 1.0 ms | 0.03% | — |
+
+`grid_sample` and the accumulate that follows it are 59% of the pass, and both
+scale linearly with the number of channels carried into the view transform. The
+reason is the expansion factor: the transform maps 18 x 32 = 576 feature
+positions onto 640,000 voxels, a factor of roughly 1100.
+
+**Decision.** A 1x1 convolution reducing 256 channels to 64, placed between the
+backbone and the view transform. `model.lift_channels`, default 64.
+
+**Result.**
+
+| | Before | After |
+|---|---|---|
+| `grid_sampler_2d` | 1.583 s / 3.66 GB | 0.398 s / 0.94 GB |
+| `mul` + `add_` | 0.520 s | 0.134 s |
+| `mkldnn_convolution` | 1.238 s | 0.614 s |
+| **forward, batch 1** | **3.95 s** | **1.51 s** |
+
+Both view-transform figures fell by exactly the predicted 4x. The backbone also
+halved, which was not predicted and has not been investigated; the neck does
+not change the ResNet's work, so this is most likely a layout or scheduling
+effect in MKL-DNN, or incomplete warm-up in the first profile. It is not
+claimed as an effect of this change.
+
+**Placement is the decision, not the layer.** The same convolution before the
+backbone would starve it on three-channel input; after the view transform it
+would arrive too late to avoid the cost. It

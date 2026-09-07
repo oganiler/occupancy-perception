@@ -43,6 +43,7 @@ class OccupancyNet(nn.Module):
         backbone: FeatureExtractor,
         view_transform: nn.Module,
         spec: GridSpec,
+        lift_channels: int = 64, #to speed up forward projection, the number of channels carried into the view transform.
         hidden_channels: int = 64,
     ) -> None:
         super().__init__()
@@ -51,8 +52,14 @@ class OccupancyNet(nn.Module):
         self.spec = spec
         self.register_buffer("voxel_centers", voxel_centers(spec))
 
+        # 1x1 convolution reducing the backbone's channel count before lifting.
+        # Purely a channel projection: no spatial mixing, feature map size
+        # unchanged. Standard in BEVDet/BEVFormer, where features are reduced
+        # to 64-80 channels before the view transform for the same reason.
+        self.neck = nn.Conv2d(backbone.out_channels, lift_channels, 1)
+
         self.voxel_encoder = nn.Sequential(
-            nn.Conv3d(backbone.out_channels, hidden_channels, 3, padding=1),
+            nn.Conv3d(lift_channels, hidden_channels, 3, padding=1),
             nn.BatchNorm3d(hidden_channels),
             nn.ReLU(inplace=True),
             nn.Conv3d(hidden_channels, hidden_channels, 3, padding=1),
@@ -71,6 +78,7 @@ class OccupancyNet(nn.Module):
 
         # Fold T and cameras into the batch: one shared backbone, N passes.
         feats = self.backbone(imgs.reshape(B * T * N, *imgs.shape[3:]))
+        feats = self.neck(feats)                    # (B*T*N, lift_channels = 64, h, w)
         feats = feats.reshape(B, N, *feats.shape[1:])              # (B,N,C,h,w)
 
         voxels = self.view_transform(

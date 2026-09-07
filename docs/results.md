@@ -152,3 +152,22 @@ python scripts/diag_scenes.py --scenes 2
 # Ego displacement against coverage, computed from stored ego poses
 python scripts/diag_motion.py
 ```
+
+## DL pipeline throughput
+
+Batch size 1, six cameras at 288 x 512, ResNet18 at stride 16, CPU only.
+
+| Stage | Self CPU | Share |
+|---|---|---|
+| Backbone (`mkldnn_convolution`) | 0.614 s | 49% |
+| View transform (`grid_sampler_2d`) | 0.398 s | 32% |
+| Camera accumulate (`mul`, `add_`) | 0.134 s | 11% |
+| Other | ~0.11 s | 8% |
+| **Forward, end to end** | **1.51 s** | |
+
+Reduced from 3.95 s by the channel reduction in D-010, chosen from this profile
+rather than from where the cost appeared to be. The backbone is now the
+dominant term.
+
+Peak allocation in the view transform is 0.94 GB, against 3.66 GB before the
+reduction.

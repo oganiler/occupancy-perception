@@ -67,6 +67,7 @@ class BackboneConfig:
 class ModelConfig:
     backbone: BackboneConfig = field(default_factory=BackboneConfig)
     view_transform: str = "naive"   # naive | lss | deformable_attention
+    lift_channels: int = 64 #to speed up forward projection, the number of channels carried into the view transform.
     hidden_channels: int = 64
 
 @dataclass

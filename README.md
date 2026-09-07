@@ -123,6 +123,7 @@ measurements behind them can be reproduced rather than taken on trust.
 | `diag_motion.py` | Ego displacement against coverage, from stored ego poses | §3, D-001 |
 | `memory_layout.py` | Compression under three array layouts | D-005 |
 | `render_bev.py` | BEV state, semantics, and x-z slice figures | §2.7 |
+| `profile_forward.py` | Per-operation forward-pass profile with allocations | D-010 |
 
 ```bash
 # environment
@@ -140,6 +141,9 @@ docker compose run --rm occ python scripts/diag_motion.py
 
 # measurement behind D-005
 docker compose run --rm occ python scripts/memory_layout.py
+
+# measurement behind D-010
+docker compose run --rm occ python scripts/profile_forward.py --batch-size 1
 
 # figures
 docker compose run --rm occ python scripts/render_bev.py
@@ -169,6 +173,7 @@ describe.
 | `data.image_size` | `[288, 512]` | exact 16:9 from 900×1600 — see D-007 |
 | `model.backbone.name` | `resnet18` | any torchvision ResNet |
 | `loss.use_camera_mask` | `false` | see D-008 |
+| `model.lift_channels` | `64` | channels carried into the view transform — see D-010 |
 
 ## Repository layout
 
