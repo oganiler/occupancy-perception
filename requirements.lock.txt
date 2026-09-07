@@ -19,7 +19,7 @@ narwhals==2.25.0
 networkx==3.6.1
 numpy==1.26.4
 nuscenes-devkit==1.2.0
--e git+ssh://git@github.com/oganiler/occupancy-perception.git@90d725198d9fce6df61165781cb13213892c0bf1#egg=occupancy_perception
+-e git+ssh://git@github.com/oganiler/occupancy-perception.git@309e637f9533e411e6dfdcdc6d2d15d506cff356#egg=occupancy_perception
 omegaconf==2.3.0
 opencv-python-headless==4.11.0.86
 packaging==26.3
