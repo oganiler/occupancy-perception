@@ -107,7 +107,7 @@ fast-moving ego, because the grid is a thin slab — 80 x 80 m wide but only
 of view of -30 to +10 degrees. Only beams between roughly -2.6 and +5 degrees
 remain inside the slab for the full 40 m; the rest exit within metres. Free
 space therefore concentrates into a disc around sensor height, visible as the
-horizontal band in the x-z slice of `docs/figures/bev_scene0757.png`.
+horizontal band in the x-z slice of `docs/figures/bev.png`.
 
 ## Occupied is stable; free is not
 
