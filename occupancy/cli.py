@@ -14,6 +14,7 @@ from occupancy.config import load_config
 from occupancy.factory import build_adapter, build_grid_spec, build_voxelizer
 from occupancy.gt.backends.base import to_target
 from occupancy.gt.shard import write_shard
+from occupancy.gt.box_fill import apply_box_fill
 
 
 def cmd_gt(args: argparse.Namespace) -> int:
@@ -45,6 +46,9 @@ def cmd_gt(args: argparse.Namespace) -> int:
             extra_free_points_m=c.free_only_points_m,
             extra_free_origins_m=c.free_only_origins_m,
         )
+
+        fill = apply_box_fill(state, sem, sample.boxes, spec, cfg.gt.box_fill)
+
         path = write_shard(out_dir, sample, to_target(state, sem), cfg.dataset.root)
         total_bytes += path.stat().st_size
 
@@ -52,7 +56,8 @@ def cmd_gt(args: argparse.Namespace) -> int:
         stats.append((u, f, o))
         print(f"[{i}/{len(tokens)}] {sample.scene_name} {token[:8]} "
               f"kf={sample.num_keyframes} unobs={u:.0%} free={f:.0%} "
-              f"occ={o:.1%} {path.stat().st_size/1024:.0f} KiB")
+              f"occ={o:.1%} {path.stat().st_size/1024:.0f} KiB "
+              f"fixed={fill['corrected']} ")
 
     dt = time.perf_counter() - t_start
     raw = spec.num_voxels * len(tokens)

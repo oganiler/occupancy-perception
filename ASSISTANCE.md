@@ -48,6 +48,7 @@ output.
 | **D-006** `free_ray_stride` rejected | **Me** | Assisted | Measurement designed jointly; the interpretation that ray-level striding perforates free space into higher-entropy speckle, and that this is why files grow, was worked out in discussion |
 | Voxelizer tests | Assisted | Assisted | Cases proposed and drafted with assistance; the properties they pin (precedence, determinism, the pass-3 guard) follow from decisions that are mine |
 | **D-010** channel reduction before lifting | Assisted | Assisted | The LLM first proposed batching the per-camera loop and fusing the projection matrices, arguing from operation counts. Profiling showed that target was 0.03% of the forward pass. The channel reduction was then identified from the measurement. Recorded here because the initial analysis was wrong and the profile, not the argument, chose the fix |
+| **D-011** vehicle interior correction | **Me** | Assisted | Defect identified and the correction/assertion split proposed by me; diagnostic and implementation drafted with assistance |
 
 ### Deep learning pipeline
 
@@ -91,6 +92,15 @@ should be matched to the LiDAR frame nearest the camera timestamp led to the
 explicit treatment of why `t_ref` is the correct dynamic-correction target, and
 to the residual limitation that the six cameras are not simultaneous with each
 other.
+
+**The vehicle-interior defect (D-011).** I proposed filling reference-time
+vehicle boxes after pass 2, and separated the operation into a correction
+(interior FREE -> UNOBSERVED) and an assertion (UNOBSERVED -> OCCUPIED),
+observing that the first removes a wrong claim while the second adds an
+unmeasured one. The defect was then quantified at 26.9% of vehicle interior
+voxels and eliminated. The restriction to vehicles, and the argument that box
+shape rather than provenance is the objection to the assertion variant, were
+raised in review.
 
 ## Errors found in assisted output
 

@@ -60,9 +60,25 @@ class SampleData:
     scene_name: str
     timestamp_us: int
     num_keyframes: int             # actually aggregated, after boundary clamping
+    boxes: tuple[Box3D, ...]       # annotations at the reference keyframe
     cloud: AggregatedCloud
     cameras: tuple[CameraData, ...]
     T_global_from_ego: np.ndarray  # (4, 4), reference keyframe ego pose
+
+
+@dataclass(frozen=True)
+class Box3D:
+    """A reference-time annotation box, free of devkit types.
+
+    `T_ego_from_box` maps box-local coordinates to the reference ego frame;
+    `half_extent_m` is (l/2, w/2, h/2), because nuScenes stores size as
+    (width, length, height) while the box's local x axis runs along length.
+    """
+
+    T_ego_from_box: np.ndarray     # (4, 4)
+    half_extent_m: np.ndarray      # (3,)  along box-local x, y, z
+    label: int                     # Occ3D class index
+    name: str
 
 
 class NuScenesAdapter:
@@ -219,6 +235,7 @@ class NuScenesAdapter:
             cloud=cloud,
             cameras=self._cameras(ref_sample),
             T_global_from_ego=T_global_from_egoref,
+            boxes=self._boxes_ego(ref_sd_token, T_egoref_from_global),
         )
 
     # -- window selection --------------------------------------------------
@@ -365,6 +382,27 @@ class NuScenesAdapter:
 
         keep = ~drop
         return corrected[:, keep], is_dyn[keep], labels[keep]
+
+    def _boxes_ego(
+        self, ref_sd_token: str, T_egoref_from_global: np.ndarray
+    ) -> tuple[Box3D, ...]:
+        """Reference-keyframe boxes, expressed in the reference ego frame."""
+        out: list[Box3D] = []
+        for box in self.nusc.get_boxes(ref_sd_token):
+            T_global_from_box = transform_matrix(box.center, box.orientation)
+            w, l, h = box.wlh
+            fine = self.nusc.lidarseg_name2idx_mapping.get(box.name)
+            if fine is None:
+                continue                       # not in the lidarseg taxonomy
+            out.append(
+                Box3D(
+                    T_ego_from_box=T_egoref_from_global @ T_global_from_box,
+                    half_extent_m=np.array([l / 2.0, w / 2.0, h / 2.0]),
+                    label=int(self._lut[fine]),
+                    name=box.name,
+                )
+            )
+        return tuple(out)
 
     # -- cameras -----------------------------------------------------------
 

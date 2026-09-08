@@ -766,4 +766,143 @@ claimed as an effect of this change.
 
 **Placement is the decision, not the layer.** The same convolution before the
 backbone would starve it on three-channel input; after the view transform it
-would arrive too late to avoid the cost. It
+would arrive too late to avoid the cost. It works only immediately before the
+stage whose cost scales with channel count.
+
+**An alternative rejected on the evidence.** Vectorising the per-camera loop in
+the view transform — batching all B x N cameras into one `grid_sample` and
+fusing K with the inverse extrinsics into a single projection matrix — was
+considered first. The profile shows why it was the wrong target: `linalg_inv`
+is 0.03% of the pass, and `grid_sample` is six calls averaging 66 ms, so
+dispatch overhead is negligible against the work. Batching would also
+materialise (B, N, C, V) at once: 2 GB even after the neck, against roughly
+0.16 GB for the loop. The readable loop was kept.
+
+**Cost.** An irreversible 4:1 compression before lifting. A trained projection
+would learn which 64-dimensional subspace to keep; the untrained one keeps a
+random subspace, which preserves structure approximately but is not optimised.
+Whether 64 channels suffice for 18-class semantics cannot be established here,
+since no model is trained. 64 is the operating point used by BEVDet and
+BEVFormer, adopted as a reasonable default rather than a tuned value, and would
+be among the first parameters to sweep if training were in scope.
+
+Adds 16,448 parameters (3.3M -> 3.4M total).
+
+## D-011: Correcting free space inside reference-time vehicle boxes
+
+**Status:** accepted
+
+**Context.**
+Pass 1 casts free-space rays from every keyframe in the aggregation window. A
+vehicle occupying volume B at t_ref was elsewhere earlier in the window, so
+beams from those keyframes passed through B — where the space genuinely was
+empty at the time — and marked it FREE. Pass 2 then marks only the near surface
+OCCUPIED, because that is where the returns landed.
+
+The result is a vehicle shell containing free space. Not merely hollow:
+actively asserting empty air inside a volume that is occupied at t_ref.
+
+Neither existing guard prevents this. D-003 governs a *dynamic* point's own ray
+contradicting its corrected position; these rays terminate on static geometry
+and carry no annotation flag. The pass-3 `UNOBSERVED`-only guard runs after
+pass 2; pass 1 runs before, when the voxel is genuinely unobserved and marking
+it free is a legitimate measurement.
+
+The root cause is temporal: free space is measured at one instant and asserted
+at another. Nothing in a ray records that the space it crossed later became
+occupied. The reference-time box is the only object that knows.
+
+**Measurement, before.** First seen on one sample: six vehicle boxes, 2,761
+interior voxels, **free 26.9%**, with the free fraction splitting sharply per
+object (65%, 54%, 46%, 20%, 8%, 6%), consistent with moving versus parked
+vehicles.
+
+Then measured systematically on every 4th shard of the mini split (101 samples,
+all ten scenes), recomputing the uncorrected grid for each. Vehicle boxes with
+at least four voxels, 1,556 in total. The *body core* is the box shrunk by one
+voxel per side, so that surface voxels do not dilute the interior. Speed from
+`box_velocity`; moving is ≥ 1 m/s, static is ≤ 0.2 m/s.
+
+| interior voxels, before | boxes | unobserved | free      | occupied |
+|-------------------------|-------|------------|-----------|----------|
+| full box                | 1,556 | 51.2%      | 28.6%     | 20.3%    |
+| body core               | 1,556 | 64.7%      | 23.1%     | 12.2%    |
+| body core, moving       | 354   | 29.6%      | **56.5%** | 13.9%    |
+| body core, static       | 1,118 | 78.8%      | 10.1%     | 11.1%    |
+
+The 10% free inside static cores is box looseness — air above hood and trunk
+that the box includes. The remaining 46 points is the motion effect. Moving
+and stationary vehicles therefore receive systematically different targets for
+the same physical object, and a single-frame model cannot tell them apart.
+
+**Options.** Two operations, separable and not equivalent:
+
+- **(a) correction.** Interior FREE -> UNOBSERVED. Removes a claim the data
+  does not support at t_ref, using annotation the pipeline already relies on
+  for dynamic correction (D-003).
+- **(b) assertion.** Interior UNOBSERVED -> OCCUPIED with the box class. Adds a
+  claim no sensor made, and approximates the vehicle as a cuboid.
+
+**Decision.** (a) enabled by default; (b) implemented and configurable, off.
+`gt.box_fill: none | correct | assert`.
+
+**Rationale.**
+Only (a) is unambiguously correct: it deletes an error rather than inventing
+data, and the box is measured annotation rather than a heuristic — so D-001's
+objection to inference in the ground truth does not apply.
+
+(b) is a shape approximation, and the data shows why that matters. One truck
+in the first sample, 1,192 voxels, is 84% unobserved after correction, and most of that volume
+is genuinely empty: ground clearance beneath the trailer, air around the cab.
+Filling it would assert a solid block where there is none, discarding exactly
+the property that motivates occupancy over 3D detection — the ability to
+represent non-cuboid geometry.
+
+The argument *for* (b) is real and is why it is implemented rather than
+dismissed: a vehicle the ego drives past accumulates a fuller shell than one
+seen from a single angle, so identical objects currently receive different
+targets depending on viewing history. Filling would normalise that. Whether
+the shape error costs more than the inconsistency cannot be settled without
+training, so the flag exists and the default is conservative.
+
+**Restricted to vehicles.** Box-to-volume fill ratio is high enough only there.
+A pedestrian's box is mostly air, a traffic cone's almost entirely so.
+
+**Measurement, after.** Same 101 samples, same 1,556 boxes, read from the
+shipped shards:
+
+| interior voxels, after | unobserved | free     | occupied |
+|------------------------|------------|----------|----------|
+| full box               | 79.7%      | **0.0%** | 20.3%    |
+| body core              | 87.8%      | **0.0%** | 12.2%    |
+
+The defect is eliminated. Occupied is unchanged to the voxel, confirming the
+correction never overwrites a pass-2 endpoint — the property
+`test_correct_never_touches_occupied` pins synthetically and this verifies on
+real data. The shipped shard equals the recomputed correction for 101 of 101
+samples.
+
+Per-sample corrections range from 120 voxels (scene-0103) to 3,221
+(scene-0655), median 1,316, with more where traffic is moving. That spread is
+the mechanism visible in aggregate.
+
+**Consequences.**
+- **Cost is 0.23 points.** Over the same 101 samples the whole grid moves from
+  unobserved 62.9% / free 34.3% / occupied 2.80% to 63.2% / 34.0% / 2.80%.
+  Corrected voxels move from `free`, which carries a gradient, to
+  `unobserved`, which does not, so the correction trades supervised volume for
+  correctness — the right trade when the supervision was wrong. Vehicle
+  interiors are under 1% of a 640,000-voxel grid: removing free space that
+  made up 23% of vehicle body cores costs 0.23 points of supervision overall.
+  The correction is enabled by default on that basis.
+- Runs after pass 2 in `cmd_gt`, not inside the voxelizer. The voxelizer knows
+  nothing about annotations by design (D-003 passes per-point flags, not
+  boxes); handing it boxes would couple it to annotation semantics.
+- Adds `Box3D` to `SampleData`, a devkit-free dataclass carrying
+  `T_ego_from_box`, half extents and the Occ3D class. nuScenes stores size as
+  (width, length, height) while the box's local x axis runs along length, so
+  the half extents are (l/2, w/2, h/2) — a transposition worth stating, since
+  it is silent if wrong.
+
+**Attribution.** Identified and proposed by the author, including the
+separation of the correction from the assertion. See ASSISTANCE.md.

@@ -35,6 +35,7 @@ class GTConfig:
     free_sweep_stride: int = 0
     backend: str = "python"                  # python | cpp
     generate_camera_mask: bool = False
+    box_fill: str = "correct"          # none | correct | assert
     output_dir: str = "/workspace/gt_shards"
 
 
@@ -139,3 +140,8 @@ def _validate(cfg: DictConfig) -> None:
 
     if cfg.gt.free_sweep_stride < 0:
         raise ValueError("gt.free_sweep_stride must be >= 0 (0 disables)")    
+
+    if cfg.gt.box_fill not in ("none", "correct", "assert"):
+        raise ValueError(
+            f"gt.box_fill must be none|correct|assert, got {cfg.gt.box_fill!r}"
+        )   

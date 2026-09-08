@@ -40,7 +40,13 @@ gt:
   # 0 disables. N takes every Nth non-keyframe sweep in the window; each
   # retained sweep is complete, so unlike ray-level striding (D-006) this
   # does not perforate free space.
-  free_sweep_stride: 0  #Cost is roughly constant (~3x the ray count even with stride=5) while benefit scales with motion                       
+  free_sweep_stride: 0  #Cost is roughly constant (~3x the ray count even with stride=5) while benefit scales with motion      
+
+  # Correct voxels inside reference-time vehicle boxes after pass 2.
+  # 'none'    leave as generated
+  # 'correct' interior FREE -> UNOBSERVED  (D-011)
+  # 'assert'  additionally UNOBSERVED -> OCCUPIED with the box class
+  box_fill: correct             
 
   output_dir: /workspace/gt_shards
 
